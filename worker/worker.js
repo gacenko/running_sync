@@ -4,7 +4,6 @@ export default {
 
     // Strava verification
     if (request.method === "GET") {
-
       const verifyToken =
         url.searchParams.get("hub.verify_token");
 
@@ -45,9 +44,9 @@ export default {
         {
           method: "POST",
           headers: {
-            "Authorization":
+            Authorization:
               `Bearer ${env.GH_TOKEN}`,
-            "Accept":
+            Accept:
               "application/vnd.github+json",
             "Content-Type":
               "application/json"
