@@ -1,0 +1,5 @@
+{
+  "name": "running-sync-webhook",
+  "main": "worker/worker.js",
+  "compatibility_date": "2026-05-25"
+}
