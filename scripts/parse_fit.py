@@ -14,8 +14,14 @@ for r in fit.get_messages("record"):
     d = {field.name: field.value for field in r}
     ts = d.get("timestamp")
     speed = d.get("enhanced_speed") or d.get("speed")
-    if ts and speed is not None and speed > 0:
-        records.append({"timestamp": ts, "speed": speed})
+    if ts:
+        records.append({
+            "timestamp":  ts,
+            "speed":      speed,
+            "hr":         d.get("heart_rate"),
+            "cadence":    d.get("cadence"),
+            "respiration": d.get("unknown_108"),  # respiration * 100
+        })
 
 
 # ---------- HELPERS ----------
@@ -179,6 +185,7 @@ for lap in fit.get_messages("lap"):
         lap_rec_speeds = [
             r["speed"] for r in records
             if lap_start <= r["timestamp"] <= lap_end
+            and r["speed"] is not None and r["speed"] > 0
         ]
         if lap_rec_speeds:
             n = len(lap_rec_speeds)
@@ -297,6 +304,63 @@ for split in typed_splits["splits"]:
 
 # ---------- OUTPUT ----------
 
+# ---------- TIME SERIES ----------
+
+SAMPLE_INTERVAL = 10  # секунд
+
+time_series = []
+
+if records:
+    t0 = records[0]["timestamp"]
+    t_last = records[-1]["timestamp"]
+    total_sec = int((t_last - t0).total_seconds())
+
+    # Індексуємо records за секундою від старту для швидкого lookup
+    rec_by_sec = {}
+    for rec in records:
+        sec = int((rec["timestamp"] - t0).total_seconds())
+        rec_by_sec[sec] = rec
+
+    for sec in range(0, total_sec + 1, SAMPLE_INTERVAL):
+        # Шукаємо найближчий запис в межах ±5 сек
+        closest = None
+        for offset in range(0, 6):
+            for delta in ([0, -offset, offset] if offset > 0 else [0]):
+                r = rec_by_sec.get(sec + delta)
+                if r is not None:
+                    closest = r
+                    break
+            if closest:
+                break
+
+        if closest is None:
+            time_series.append({
+                "hr":              None,
+                "pace_sec_per_km": None,
+                "cadence":         None,
+                "respiration":     None,
+            })
+        else:
+            speed = closest.get("speed")
+            pace_sec = round(1000 / speed) if speed and speed > 0 else None
+
+            cad = closest.get("cadence")
+            frac = 0  # fractional_cadence not stored, negligible
+            cadence_spm = int(cad * 2) if cad is not None else None
+
+            resp_raw = closest.get("respiration")
+            respiration = round(resp_raw / 100, 1) if resp_raw is not None else None
+
+            time_series.append({
+                "hr":              closest.get("hr"),
+                "pace_sec_per_km": pace_sec,
+                "cadence":         cadence_spm,
+                "respiration":     respiration,
+            })
+
+
+# ---------- OUTPUT ----------
+
 running_data = {
     "generated_at": datetime.datetime.now().isoformat(),
     "activity": {
@@ -331,6 +395,10 @@ running_data = {
     "sleep":      sleep_data,
     "subjective": subjective,
     "intervals":  intervals,
+    "time_series": {
+        "sample_interval_sec": SAMPLE_INTERVAL,
+        "data": time_series,
+    },
 }
 
 with open("running-data.json", "w", encoding="utf-8") as f:
