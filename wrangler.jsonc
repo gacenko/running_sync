@@ -1,0 +1,17 @@
+{
+  "name": "running-sync-webhook",
+  "main": "worker/worker.js",
+  "compatibility_date": "2026-05-25",
+
+  "vars": {
+    "GITHUB_OWNER": "gacenko",
+    "GITHUB_REPO": "running_sync"
+  },
+
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
+}
