@@ -72,6 +72,11 @@ def utc_ms_to_kyiv(ms):
     return dt.astimezone(KYIV_TZ).strftime("%H:%M")
 
 
+weather_data = None
+if os.path.exists("weather.json"):
+    with open("weather.json", "r", encoding="utf-8") as f:
+        weather_data = json.load(f)
+
 sleep_data = None
 if os.path.exists("sleep.json"):
     with open("sleep.json", "r", encoding="utf-8") as f:
@@ -394,6 +399,7 @@ running_data = {
         },
     },
     "workout":    parsed_workout,
+    "weather":    weather_data,
     "sleep":      sleep_data,
     "subjective": subjective,
     "intervals":  intervals,

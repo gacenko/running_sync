@@ -140,6 +140,67 @@ try:
 except Exception as e:
     print(f"Sleep failed: {e}")
 
+# ===== WEATHER =====
+# Open-Meteo historical API — no API key required.
+# Uses GMT start time to get hourly weather at the activity location.
+
+try:
+    import urllib.request
+
+    start_gmt = activity["summaryDTO"]["startTimeGMT"]
+    lat = activity["summaryDTO"]["startLatitude"]
+    lon = activity["summaryDTO"]["startLongitude"]
+
+    dt_gmt = datetime.fromisoformat(start_gmt.split(".")[0])
+    date_str = dt_gmt.strftime("%Y-%m-%d")
+    hour = dt_gmt.hour
+
+    url = (
+        f"https://archive-api.open-meteo.com/v1/archive"
+        f"?latitude={lat}&longitude={lon}"
+        f"&start_date={date_str}&end_date={date_str}"
+        f"&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,precipitation,weather_code"
+        f"&wind_speed_unit=kmh"
+        f"&timezone=UTC"
+    )
+
+    print()
+    print(f"Loading weather for {date_str} hour {hour} UTC...")
+
+    with urllib.request.urlopen(url, timeout=10) as r:
+        raw = json.loads(r.read())
+
+    hourly = raw["hourly"]
+    # WMO weather code → human-readable description
+    WMO_CODES = {
+        0: "clear",
+        1: "mostly_clear", 2: "partly_cloudy", 3: "overcast",
+        45: "fog", 48: "fog",
+        51: "light_drizzle", 53: "drizzle", 55: "heavy_drizzle",
+        61: "light_rain", 63: "rain", 65: "heavy_rain",
+        71: "light_snow", 73: "snow", 75: "heavy_snow",
+        77: "snow_grains",
+        80: "light_showers", 81: "showers", 82: "heavy_showers",
+        85: "snow_showers", 86: "heavy_snow_showers",
+        95: "thunderstorm", 96: "thunderstorm_with_hail", 99: "thunderstorm_with_hail",
+    }
+
+    code = hourly["weather_code"][hour]
+    weather = {
+        "temperature":    hourly["temperature_2m"][hour],
+        "wind_speed_kmh": hourly["wind_speed_10m"][hour],
+        "wind_direction": hourly["wind_direction_10m"][hour],
+        "precipitation":  hourly["precipitation"][hour],
+        "conditions":     WMO_CODES.get(code, f"unknown_{code}"),
+    }
+
+    with open("weather.json", "w", encoding="utf-8") as f:
+        json.dump(weather, f, ensure_ascii=False, indent=2)
+    print(f"Weather saved: {weather['temperature']}°C, wind {weather['wind_speed_kmh']} km/h")
+
+except Exception as e:
+    print(f"Weather failed: {e}")
+
 print()
 print("Generated files:")
 for file in os.listdir():
