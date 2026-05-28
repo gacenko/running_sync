@@ -9,6 +9,7 @@ from googleapiclient.http import MediaFileUpload
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 LAST_RUN_FILENAME = "last_run.json"
+RUNS_SUBFOLDER = "detailed_runs"
 
 
 def safe_name(text):
@@ -52,9 +53,34 @@ workout = running_data.get("workout")
 workout_name = workout.get("name") if workout else activity.get("activityName", "Run")
 filename = f"{safe_name(workout_name)} - {date_string}.json"
 
-print(f"Uploading: {filename}")
-
 folder_id = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
+
+
+# --- Helpers ---
+
+def get_or_create_subfolder(name, parent_id):
+    """Return the ID of a subfolder, creating it if it doesn't exist."""
+    try:
+        existing = service.files().list(
+            q=f"name='{name}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            fields="files(id, name)",
+        ).execute().get("files", [])
+
+        if existing:
+            print(f"Found subfolder: {name} (id: {existing[0]['id']})")
+            return existing[0]["id"]
+
+        metadata = {
+            "name": name,
+            "mimeType": "application/vnd.google-apps.folder",
+            "parents": [parent_id],
+        }
+        result = service.files().create(body=metadata, fields="id").execute()
+        print(f"Created subfolder: {name} (id: {result['id']})")
+        return result["id"]
+    except Exception as e:
+        print(f"Subfolder error: {e} — uploading to root folder instead")
+        return parent_id
 
 
 def upsert_file(name, local_path, folder):
@@ -76,8 +102,11 @@ def upsert_file(name, local_path, folder):
         print(f"Created: {name} (id: {result['id']})")
 
 
-# --- Upload named run file ---
-upsert_file(filename, "running-data.json", folder_id)
+# --- Upload named run file → runs/ subfolder ---
+runs_folder_id = get_or_create_subfolder(RUNS_SUBFOLDER, folder_id)
+print(f"Uploading: {filename} → {RUNS_SUBFOLDER}/")
+upsert_file(filename, "running-data.json", runs_folder_id)
 
-# --- Upload last_run.json (fixed name, always overwritten) ---
+# --- Upload last_run.json → root folder ---
+print(f"Uploading: {LAST_RUN_FILENAME}")
 upsert_file(LAST_RUN_FILENAME, "running-data.json", folder_id)
