@@ -131,7 +131,7 @@ print("Updating training_log.json...")
 
 existing_log = download_json(TRAINING_LOG_FILENAME, folder_id) or []
 
-new_entry = build_log_entry(running_data)
+new_entry = build_log_entry(running_data, date_string)
 
 # Check if entry for this date already exists — update it if so
 cutoff = datetime.now() - timedelta(weeks=LOG_WINDOW_WEEKS)
@@ -158,8 +158,8 @@ for entry in existing_log:
 if not updated:
     updated_log.append(new_entry)
 
-# Sort by date ascending
-updated_log.sort(key=lambda e: datetime.strptime(e["date"], "%d.%m.%Y"))
+# Sort by date descending — newest first
+updated_log.sort(key=lambda e: datetime.strptime(e["date"], "%d.%m.%Y"), reverse=True)
 
 print(f"training_log: {len(updated_log)} entries (window: {LOG_WINDOW_WEEKS} weeks)")
 

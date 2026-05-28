@@ -4,15 +4,12 @@ log_entry.py — transforms running-data.json into a compact training_log entry.
 Used by upload_drive.py after each run to append to training_log.json on Drive.
 """
 
-from datetime import datetime
-
 
 def _map_steps(steps):
     """Recursively map workout steps, preserving repeat blocks."""
     result = []
     for step in steps:
         step_type = step.get("type")
-        # Normalize stepType object to string key
         if isinstance(step_type, dict):
             step_type = step_type.get("stepTypeKey")
 
@@ -25,18 +22,20 @@ def _map_steps(steps):
                     "steps": nested,
                 })
         else:
-            target = step.get("target")
             result.append({
                 "type":       step_type,
                 "distance_m": step.get("distance_m"),
-                "target":     target,
+                "target":     step.get("target"),
             })
     return result
 
 
-def build_log_entry(running_data):
+def build_log_entry(running_data, activity_date_str):
     """
     Build a compact training_log entry from a full running-data dict.
+
+    activity_date_str: date string in DD.MM.YYYY format from the actual activity,
+                       passed in from upload_drive.py which reads activity.json.
 
     Returns a dict with: date, workout, result, intervals, sleep, subjective.
     """
@@ -45,13 +44,6 @@ def build_log_entry(running_data):
     workout  = running_data.get("workout")
     sleep    = running_data.get("sleep") or {}
     subj     = running_data.get("subjective") or {}
-
-    # Date from generated_at (ISO string)
-    generated_at = running_data.get("generated_at", "")
-    try:
-        date_str = datetime.fromisoformat(generated_at).strftime("%d.%m.%Y")
-    except Exception:
-        date_str = "unknown"
 
     # Workout — compact steps
     workout_out = None
@@ -68,7 +60,7 @@ def build_log_entry(running_data):
         "avg_hr":      summary.get("avg_hr"),
     }
 
-    # Intervals — compact: type, avg_pace, avg_hr, splits (lap, distance_m, avg_pace, avg_hr)
+    # Intervals — compact: type, avg_pace, avg_hr, splits
     intervals_out = []
     for interval in running_data.get("intervals", []):
         interval_type = interval.get("type")
@@ -113,7 +105,7 @@ def build_log_entry(running_data):
         }
 
     return {
-        "date":       date_str,
+        "date":       activity_date_str,
         "workout":    workout_out,
         "result":     result,
         "intervals":  intervals_out,
