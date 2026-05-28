@@ -99,34 +99,46 @@ parsed_workout = None
 workout_steps = []
 
 if workout:
+    def parse_step_fit(step, index):
+        target_type = step.get("targetType")
+        target_key = (target_type or {}).get("workoutTargetTypeKey")
+        v1 = step.get("targetValueOne")
+        v2 = step.get("targetValueTwo")
+
+        if target_key == "pace.zone" and v1 and v2:
+            faster, slower = (v1, v2) if v1 > v2 else (v2, v1)
+            target = {
+                "type":     "pace.zone",
+                "min_pace": speed_to_pace(faster),
+                "max_pace": speed_to_pace(slower),
+            }
+        elif target_key and target_key != "no.target":
+            target = {"type": target_key}
+        else:
+            target = None
+
+        return {
+            "index":       index,
+            "type":        step.get("stepType"),
+            "description": step.get("description"),
+            "distance_m":  step.get("endConditionValue"),
+            "target":      target,
+        }
+
+    def collect_steps_fit(raw_steps):
+        for step in raw_steps:
+            step_type = step.get("type", "")
+            if "repeat" in step_type.lower() or step.get("numberOfIterations"):
+                nested = step.get("workoutSteps", [])
+                collect_steps_fit(nested)
+            else:
+                step_data = parse_step_fit(step, len(workout_steps))
+                workout_steps.append(step_data)
+                steps.append(step_data)
+
     steps = []
     for segment in workout.get("workoutSegments", []):
-        for step in segment.get("workoutSteps", []):
-            target_type = step.get("targetType")
-            target_key = (target_type or {}).get("workoutTargetTypeKey")
-            v1 = step.get("targetValueOne")   # повільніша межа (м/с)
-            v2 = step.get("targetValueTwo")   # швидша межа (м/с)
-
-            if target_key == "pace.zone" and v1 and v2:
-                target = {
-                    "type":      "pace.zone",
-                    "min_pace":  speed_to_pace(v2),   # швидший темп = мінімальний (менше сек/км)
-                    "max_pace":  speed_to_pace(v1),   # повільніший темп = максимальний (більше сек/км)
-                }
-            elif target_key and target_key != "no.target":
-                target = {"type": target_key}
-            else:
-                target = None
-
-            step_data = {
-                "index":       len(workout_steps),
-                "type":        step.get("stepType"),
-                "description": step.get("description"),
-                "distance_m":  step.get("endConditionValue"),
-                "target":      target,
-            }
-            workout_steps.append(step_data)
-            steps.append(step_data)
+        collect_steps_fit(segment.get("workoutSteps", []))
 
     parsed_workout = {
         "id":    workout.get("workoutId"),
@@ -302,8 +314,6 @@ for split in typed_splits["splits"]:
         logical_interval += 1
 
 
-# ---------- OUTPUT ----------
-
 # ---------- TIME SERIES ----------
 
 SAMPLE_INTERVAL = 10  # секунд
@@ -345,7 +355,6 @@ if records:
             pace_sec = round(1000 / speed) if speed and speed > 0 else None
 
             cad = closest.get("cadence")
-            frac = 0  # fractional_cadence not stored, negligible
             cadence_spm = int(cad * 2) if cad is not None else None
 
             resp_raw = closest.get("respiration")
