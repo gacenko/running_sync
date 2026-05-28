@@ -60,27 +60,22 @@ folder_id = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
 
 def get_or_create_subfolder(name, parent_id):
     """Return the ID of a subfolder, creating it if it doesn't exist."""
-    try:
-        existing = service.files().list(
-            q=f"name='{name}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
-            fields="files(id, name)",
-        ).execute().get("files", [])
+    existing = service.files().list(
+        q=f"name='{name}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+        fields="files(id, name)",
+    ).execute().get("files", [])
 
-        if existing:
-            print(f"Found subfolder: {name} (id: {existing[0]['id']})")
-            return existing[0]["id"]
+    if existing:
+        return existing[0]["id"]
 
-        metadata = {
-            "name": name,
-            "mimeType": "application/vnd.google-apps.folder",
-            "parents": [parent_id],
-        }
-        result = service.files().create(body=metadata, fields="id").execute()
-        print(f"Created subfolder: {name} (id: {result['id']})")
-        return result["id"]
-    except Exception as e:
-        print(f"Subfolder error: {e} — uploading to root folder instead")
-        return parent_id
+    metadata = {
+        "name": name,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [parent_id],
+    }
+    result = service.files().create(body=metadata, fields="id").execute()
+    print(f"Created subfolder: {name} (id: {result['id']})")
+    return result["id"]
 
 
 def upsert_file(name, local_path, folder):
