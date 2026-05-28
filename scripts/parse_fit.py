@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 fit = fitparse.FitFile("activity.fit")
 
-# ---------- RECORDS (speed per second, used for best_pace calc) ----------
+# --- Records (per-second data for best_pace and time series) ---
 
 records = []
 
@@ -16,18 +16,18 @@ for r in fit.get_messages("record"):
     speed = d.get("enhanced_speed") or d.get("speed")
     if ts:
         records.append({
-            "timestamp":  ts,
-            "speed":      speed,
-            "hr":         d.get("heart_rate"),
-            "cadence":    d.get("cadence"),
-            "respiration": d.get("unknown_108"),  # respiration * 100
+            "timestamp":   ts,
+            "speed":       speed,
+            "hr":          d.get("heart_rate"),
+            "cadence":     d.get("cadence"),
+            "respiration": d.get("unknown_108"),  # respiration rate * 100, undocumented FIT field
         })
 
 
-# ---------- HELPERS ----------
+# --- Helpers ---
 
 def speed_to_pace(speed):
-    if not speed:
+    if not speed or speed <= 0:
         return None
     sec = 1000 / speed
     mins = int(sec // 60)
@@ -39,20 +39,17 @@ def speed_to_pace(speed):
 
 
 def int_or_none(value):
-    """Конвертує float→int, None залишає None."""
     if value is None:
         return None
     return int(round(value))
 
 
-# Типи лапів де best_pace не інформативний:
-# хвости від сусідніх інтервалів спотворюють показник
+# best_pace is suppressed for recovery and cooldown laps —
+# neighbouring interval speeds distort the rolling window result
 NO_BEST_PACE_TYPES = {"INTERVAL_RECOVERY", "INTERVAL_COOLDOWN"}
 
-# ---------- LAPS ----------
 
-
-# ---------- LOAD FILES ----------
+# --- Load files ---
 
 with open("activity.json", "r", encoding="utf-8") as f:
     activity = json.load(f)
@@ -66,12 +63,14 @@ if os.path.exists("workout.json"):
 
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
+
 def utc_ms_to_kyiv(ms):
-    """Конвертує Unix timestamp у мілісекундах → рядок ISO в київському часі."""
+    """Convert Unix timestamp in milliseconds to HH:MM string in Kyiv timezone."""
     if ms is None:
         return None
     dt = datetime.datetime.fromtimestamp(ms / 1000, tz=datetime.timezone.utc)
     return dt.astimezone(KYIV_TZ).strftime("%H:%M")
+
 
 sleep_data = None
 if os.path.exists("sleep.json"):
@@ -93,7 +92,7 @@ if os.path.exists("sleep.json"):
         print(f"Sleep parse error: {e}")
 
 
-# ---------- WORKOUT ----------
+# --- Workout ---
 
 parsed_workout = None
 workout_steps = []
@@ -106,6 +105,7 @@ if workout:
         v2 = step.get("targetValueTwo")
 
         if target_key == "pace.zone" and v1 and v2:
+            # Garmin may return v1/v2 in either order — always assign by speed value
             faster, slower = (v1, v2) if v1 > v2 else (v2, v1)
             target = {
                 "type":     "pace.zone",
@@ -129,8 +129,7 @@ if workout:
         for step in raw_steps:
             step_type = step.get("type", "")
             if "repeat" in step_type.lower() or step.get("numberOfIterations"):
-                nested = step.get("workoutSteps", [])
-                collect_steps_fit(nested)
+                collect_steps_fit(step.get("workoutSteps", []))
             else:
                 step_data = parse_step_fit(step, len(workout_steps))
                 workout_steps.append(step_data)
@@ -146,8 +145,7 @@ if workout:
         "steps": steps,
     }
 
-# Кількість активних кроків у плані — щоб відрізнити
-# планові інтервали від пробіжки після завершення плану
+# Number of planned active intervals — used to tag extra laps as post_workout
 planned_active_count = sum(
     1 for s in workout_steps
     if isinstance(s.get("type"), dict)
@@ -155,20 +153,20 @@ planned_active_count = sum(
 ) if workout_steps else None
 
 
-# ---------- SUBJECTIVE ----------
+# --- Subjective ---
 
-feeling_map = {0: "very_weak", 25: "weak", 50: "normal", 75: "strong", 100: "very_strong"}
+FEELING_MAP = {0: "very_weak", 25: "weak", 50: "normal", 75: "strong", 100: "very_strong"}
 
 rpe = summary.get("directWorkoutRpe")
 subjective = {
     "feeling_score":    summary.get("directWorkoutFeel"),
-    "feeling":          feeling_map.get(summary.get("directWorkoutFeel")),
+    "feeling":          FEELING_MAP.get(summary.get("directWorkoutFeel")),
     "perceived_effort": int(rpe / 10) if rpe is not None else None,
     "scale":            10,
 }
 
 
-# ---------- LAPS ----------
+# --- Laps ---
 
 laps = []
 lap_number = 1
@@ -182,13 +180,10 @@ for lap in fit.get_messages("lap"):
     cumulative_time += duration
     distance = data.get("total_distance", 0)
 
-    # avg_speed: FIT lap не містить enhanced_avg_speed —
-    # рахуємо з distance / timer_time
+    # FIT lap has no enhanced_avg_speed — derive from distance / timer_time
     avg_speed = (distance / moving_time) if (distance and moving_time and moving_time > 0) else None
-    moving_speed = avg_speed
 
-    # best_pace: беремо з record-ів в межах lap,
-    # rolling 5-секундне вікно щоб згладити піки
+    # best_pace: 5-second rolling window over per-second records within the lap
     lap_start = data.get("start_time")
     lap_end = data.get("timestamp")
     max_speed = None
@@ -216,23 +211,23 @@ for lap in fit.get_messages("lap"):
     max_cadence = data.get("max_running_cadence")
 
     laps.append({
-        "lap":                    lap_number,
-        "duration_sec":           duration,
+        "lap":                     lap_number,
+        "duration_sec":            duration,
         "cumulative_duration_sec": round(cumulative_time, 1),
-        "distance_m":             round(distance, 2),
-        "avg_pace":               speed_to_pace(avg_speed),
-        "avg_hr":                 int_or_none(data.get("avg_heart_rate")),
-        "max_hr":                 int_or_none(data.get("max_heart_rate")),
-        "elevation_gain":         int_or_none(data.get("total_ascent")),
-        "elevation_loss":         int_or_none(data.get("total_descent")),
-        "avg_running_cadence":    int_or_none(cadence * 2) if cadence else None,
-        "avg_stride_length_cm":   stride_length,
-        "calories":               int_or_none(data.get("total_calories")),
-        "avg_temperature":        data.get("avg_temperature"),
-        "best_pace":              speed_to_pace(max_speed),
-        "max_running_cadence":    int_or_none(max_cadence * 2) if max_cadence else None,
-        "moving_time_sec":        moving_time,
-        "nonstop_pace":           speed_to_pace(moving_speed),
+        "distance_m":              round(distance, 2),
+        "avg_pace":                speed_to_pace(avg_speed),
+        "avg_hr":                  int_or_none(data.get("avg_heart_rate")),
+        "max_hr":                  int_or_none(data.get("max_heart_rate")),
+        "elevation_gain":          int_or_none(data.get("total_ascent")),
+        "elevation_loss":          int_or_none(data.get("total_descent")),
+        "avg_running_cadence":     int_or_none(cadence * 2) if cadence else None,
+        "avg_stride_length_cm":    stride_length,
+        "calories":                int_or_none(data.get("total_calories")),
+        "avg_temperature":         data.get("avg_temperature"),
+        "best_pace":               speed_to_pace(max_speed),
+        "max_running_cadence":     int_or_none(max_cadence * 2) if max_cadence else None,
+        "moving_time_sec":         moving_time,
+        "nonstop_pace":            speed_to_pace(avg_speed),
     })
 
     lap_number += 1
@@ -240,7 +235,7 @@ for lap in fit.get_messages("lap"):
 lap_map = {x["lap"]: x for x in laps}
 
 
-# ---------- INTERVALS ----------
+# --- Intervals ---
 
 with open("typedsplits.json", "r", encoding="utf-8") as f:
     typed_splits = json.load(f)
@@ -267,7 +262,7 @@ for split in typed_splits["splits"]:
 
     if split_type == "INTERVAL_ACTIVE":
         active_counter += 1
-        # Якщо відомо кількість планових інтервалів — позначаємо зайві як post_workout
+        # Tag extra active intervals beyond the planned count as post_workout
         if planned_active_count is not None and active_counter > planned_active_count:
             interval_type = "post_workout"
 
@@ -298,8 +293,7 @@ for split in typed_splits["splits"]:
                 "best_pace": None if split_type in NO_BEST_PACE_TYPES else lap_map[x]["best_pace"],
             }
             for x in lap_indexes if x in lap_map
-            # Обрізаємо хвостовий лап (<100м) в активному інтервалі —
-            # це залишок після завершення дистанції, не повноцінний кілометр
+            # Drop tail lap under 100m — distance remainder after completing planned workout
             if not (
                 split_type == "INTERVAL_ACTIVE"
                 and x == lap_indexes[-1]
@@ -314,9 +308,9 @@ for split in typed_splits["splits"]:
         logical_interval += 1
 
 
-# ---------- TIME SERIES ----------
+# --- Time series ---
 
-SAMPLE_INTERVAL = 10  # секунд
+SAMPLE_INTERVAL = 10  # seconds
 
 time_series = []
 
@@ -325,14 +319,14 @@ if records:
     t_last = records[-1]["timestamp"]
     total_sec = int((t_last - t0).total_seconds())
 
-    # Індексуємо records за секундою від старту для швидкого lookup
+    # Index records by elapsed second for fast lookup
     rec_by_sec = {}
     for rec in records:
         sec = int((rec["timestamp"] - t0).total_seconds())
         rec_by_sec[sec] = rec
 
     for sec in range(0, total_sec + 1, SAMPLE_INTERVAL):
-        # Шукаємо найближчий запис в межах ±5 сек
+        # Find nearest record within ±5 seconds
         closest = None
         for offset in range(0, 6):
             for delta in ([0, -offset, offset] if offset > 0 else [0]):
@@ -353,22 +347,18 @@ if records:
         else:
             speed = closest.get("speed")
             pace_sec = round(1000 / speed) if speed and speed > 0 else None
-
             cad = closest.get("cadence")
-            cadence_spm = int(cad * 2) if cad is not None else None
-
             resp_raw = closest.get("respiration")
-            respiration = round(resp_raw / 100, 1) if resp_raw is not None else None
 
             time_series.append({
                 "hr":              closest.get("hr"),
                 "pace_sec_per_km": pace_sec,
-                "cadence":         cadence_spm,
-                "respiration":     respiration,
+                "cadence":         int(cad * 2) if cad is not None else None,
+                "respiration":     round(resp_raw / 100, 1) if resp_raw is not None else None,
             })
 
 
-# ---------- OUTPUT ----------
+# --- Output ---
 
 running_data = {
     "generated_at": datetime.datetime.now().isoformat(),

@@ -122,22 +122,19 @@ except Exception as e:
     print(f"Workout failed: {e}")
 
 # ===== SLEEP =====
-# Garmin прив'язує сон до дня пробудження, тому передаємо дату активності.
-# Якщо активність рано вранці (до ~10:00) — сон міг завершитись в той же день.
-# Якщо активність після ~10:00 — також беремо ту ж дату (сон вже завершився).
-# Окремий кейс: нічна активність (після 22:00) — сон ще не завершився,
-# тому беремо наступний день. Межа: година старту < 10 або >= 22.
+# Garmin attaches sleep to the wake-up day.
+# For activities after 22:00 the run starts before sleep ends — use next day.
 
 try:
     start_local = activity["summaryDTO"]["startTimeLocal"]
-    # Garmin повертає "2026-05-26T06:00:00.0" або "2026-05-26T06:00:00"
+    # Garmin returns startTimeLocal as "2026-05-26T06:00:00.0" or "2026-05-26T06:00:00"
     activity_date = datetime.fromisoformat(start_local.split(".")[0])
     hour = activity_date.hour
     if hour >= 22:
-        # Нічна активність — сон ще попереду, беремо наступний день
+        # Late-night activity — sleep not yet finished, use next day
         sleep_date = (activity_date + timedelta(days=1)).strftime("%Y-%m-%d")
     else:
-        # Вранці або вдень — сон вже завершився в день активності
+        # Morning or daytime activity — sleep already finished on the same day
         sleep_date = activity_date.strftime("%Y-%m-%d")
 
     print()
