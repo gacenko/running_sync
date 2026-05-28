@@ -1,15 +1,21 @@
 import json
 import os
 import re
-from datetime import datetime
+import base64
+from datetime import datetime, timedelta
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from io import BytesIO
+
+from log_entry import build_log_entry
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 LAST_RUN_FILENAME = "last_run.json"
+TRAINING_LOG_FILENAME = "training_log.json"
 RUNS_SUBFOLDER = "detailed_runs"
+LOG_WINDOW_WEEKS = 8
 
 
 def safe_name(text):
@@ -97,11 +103,80 @@ def upsert_file(name, local_path, folder):
         print(f"Created: {name} (id: {result['id']})")
 
 
-# --- Upload named run file → runs/ subfolder ---
+def download_json(name, folder):
+    """Download a JSON file from Drive, returns parsed dict or None if not found."""
+    existing = service.files().list(
+        q=f"name='{name}' and '{folder}' in parents and trashed=false",
+        fields="files(id, name)",
+    ).execute().get("files", [])
+
+    if not existing:
+        return None
+
+    file_id = existing[0]["id"]
+    request = service.files().get_media(fileId=file_id)
+    buffer = BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+
+    buffer.seek(0)
+    return json.loads(buffer.read().decode("utf-8"))
+
+
+# --- Update training_log.json ---
+
+print("Updating training_log.json...")
+
+existing_log = download_json(TRAINING_LOG_FILENAME, folder_id) or []
+
+new_entry = build_log_entry(running_data)
+
+# Check if entry for this date already exists — update it if so
+cutoff = datetime.now() - timedelta(weeks=LOG_WINDOW_WEEKS)
+updated = False
+updated_log = []
+
+for entry in existing_log:
+    try:
+        entry_date = datetime.strptime(entry["date"], "%d.%m.%Y")
+    except Exception:
+        continue
+
+    # Skip entries outside the window
+    if entry_date < cutoff:
+        continue
+
+    # Replace existing entry for same date
+    if entry["date"] == new_entry["date"]:
+        updated_log.append(new_entry)
+        updated = True
+    else:
+        updated_log.append(entry)
+
+if not updated:
+    updated_log.append(new_entry)
+
+# Sort by date ascending
+updated_log.sort(key=lambda e: datetime.strptime(e["date"], "%d.%m.%Y"))
+
+print(f"training_log: {len(updated_log)} entries (window: {LOG_WINDOW_WEEKS} weeks)")
+
+with open("training_log.json", "w", encoding="utf-8") as f:
+    json.dump(updated_log, f, ensure_ascii=False, indent=2)
+
+upsert_file(TRAINING_LOG_FILENAME, "training_log.json", folder_id)
+
+
+# --- Upload named run file → detailed_runs/ subfolder ---
+
 runs_folder_id = get_or_create_subfolder(RUNS_SUBFOLDER, folder_id)
 print(f"Uploading: {filename} → {RUNS_SUBFOLDER}/")
 upsert_file(filename, "running-data.json", runs_folder_id)
 
+
 # --- Upload last_run.json → root folder ---
+
 print(f"Uploading: {LAST_RUN_FILENAME}")
 upsert_file(LAST_RUN_FILENAME, "running-data.json", folder_id)
