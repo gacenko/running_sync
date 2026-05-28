@@ -123,19 +123,13 @@ except Exception as e:
 
 # ===== SLEEP =====
 # Garmin attaches sleep to the wake-up day.
-# For activities after 22:00 the run starts before sleep ends — use next day.
+# Sleep from 22:30 May 14 to 05:30 May 15 has date May 15 — same as the activity.
 
 try:
     start_local = activity["summaryDTO"]["startTimeLocal"]
     # Garmin returns startTimeLocal as "2026-05-26T06:00:00.0" or "2026-05-26T06:00:00"
     activity_date = datetime.fromisoformat(start_local.split(".")[0])
-    hour = activity_date.hour
-    if hour >= 22:
-        # Late-night activity — sleep not yet finished, use next day
-        sleep_date = (activity_date + timedelta(days=1)).strftime("%Y-%m-%d")
-    else:
-        # Morning or daytime activity — sleep already finished on the same day
-        sleep_date = activity_date.strftime("%Y-%m-%d")
+    sleep_date = activity_date.strftime("%Y-%m-%d")
 
     print()
     print(f"Loading sleep for {sleep_date}")

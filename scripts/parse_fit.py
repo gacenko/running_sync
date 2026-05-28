@@ -79,14 +79,17 @@ if os.path.exists("sleep.json"):
     try:
         sd = raw_sleep.get("dailySleepDTO", {})
         sleep_data = {
-            "duration_hours": round(sd.get("sleepTimeSeconds", 0) / 3600, 2),
-            "deep_hours":     round(sd.get("deepSleepSeconds", 0) / 3600, 2),
-            "light_hours":    round(sd.get("lightSleepSeconds", 0) / 3600, 2),
-            "rem_hours":      round(sd.get("remSleepSeconds", 0) / 3600, 2),
-            "awake_minutes":  round(sd.get("awakeSleepSeconds", 0) / 60),
-            "score":          sd.get("sleepScores", {}).get("overall"),
-            "sleep_start":    utc_ms_to_kyiv(sd.get("sleepStartTimestampGMT")),
-            "sleep_end":      utc_ms_to_kyiv(sd.get("sleepEndTimestampGMT")),
+            "duration_hours":      round(sd.get("sleepTimeSeconds", 0) / 3600, 2),
+            "deep_hours":          round(sd.get("deepSleepSeconds", 0) / 3600, 2),
+            "light_hours":         round(sd.get("lightSleepSeconds", 0) / 3600, 2),
+            "rem_hours":           round(sd.get("remSleepSeconds", 0) / 3600, 2),
+            "awake_minutes":       round(sd.get("awakeSleepSeconds", 0) / 60),
+            "score":               sd.get("sleepScores", {}).get("overall"),
+            "sleep_start":         utc_ms_to_kyiv(sd.get("sleepStartTimestampGMT")),
+            "sleep_end":           utc_ms_to_kyiv(sd.get("sleepEndTimestampGMT")),
+            "hrv_overnight_avg":   raw_sleep.get("avgOvernightHrv"),
+            "body_battery_change": raw_sleep.get("bodyBatteryChange"),
+            "resting_hr":          raw_sleep.get("restingHeartRate"),
         }
     except Exception as e:
         print(f"Sleep parse error: {e}")
