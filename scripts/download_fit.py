@@ -187,7 +187,7 @@ try:
 
     code = hourly["weather_code"][hour]
     weather = {
-        "temperature":    hourly["temperature_2m"][hour],
+        "temperature_c":   hourly["temperature_2m"][hour],
         "wind_speed_kmh": hourly["wind_speed_10m"][hour],
         "wind_direction": hourly["wind_direction_10m"][hour],
         "precipitation":  hourly["precipitation"][hour],
@@ -196,7 +196,7 @@ try:
 
     with open("weather.json", "w", encoding="utf-8") as f:
         json.dump(weather, f, ensure_ascii=False, indent=2)
-    print(f"Weather saved: {weather['temperature']}°C, wind {weather['wind_speed_kmh']} km/h")
+    print(f"Weather saved: {weather['temperature_c']}°C, wind {weather['wind_speed_kmh']} km/h")
 
 except Exception as e:
     print(f"Weather failed: {e}")
