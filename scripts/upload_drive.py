@@ -1,7 +1,7 @@
 import json
 import os
 import re
-import base64
+import copy
 from datetime import datetime, timedelta
 
 from google.oauth2.credentials import Credentials
@@ -23,6 +23,31 @@ def safe_name(text):
         return "Run"
     text = text.replace("×", "x").replace("х", "x")
     return re.sub(r'[<>:"/\\|?*]', "", text).strip()
+
+
+def build_last_run(data):
+    """
+    Stripped version of running-data for last_run.json:
+    - no time_series (317 records — зайве для аналізу)
+    - no temperature fields (дублюють weather block)
+    """
+    d = copy.deepcopy(data)
+
+    # Прибираємо time_series
+    d.pop("time_series", None)
+
+    # Прибираємо температуру з activity.summary
+    summary = d.get("activity", {}).get("summary", {})
+    for key in ("avg_temperature", "min_temperature", "max_temperature"):
+        summary.pop(key, None)
+
+    # Прибираємо avg_temperature з кожного interval.summary і splits
+    for interval in d.get("intervals", []):
+        interval.get("summary", {}).pop("avg_temperature", None)
+        for split in interval.get("splits", []):
+            split.pop("avg_temperature", None)
+
+    return d
 
 
 # --- Auth ---
@@ -65,7 +90,6 @@ folder_id = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
 # --- Helpers ---
 
 def get_or_create_subfolder(name, parent_id):
-    """Return the ID of a subfolder, creating it if it doesn't exist."""
     existing = service.files().list(
         q=f"name='{name}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
         fields="files(id, name)",
@@ -85,7 +109,6 @@ def get_or_create_subfolder(name, parent_id):
 
 
 def upsert_file(name, local_path, folder):
-    """Upload file to Drive, overwriting if it already exists."""
     existing = service.files().list(
         q=f"name='{name}' and '{folder}' in parents and trashed=false",
         fields="files(id, name)",
@@ -103,8 +126,16 @@ def upsert_file(name, local_path, folder):
         print(f"Created: {name} (id: {result['id']})")
 
 
+def upsert_json(name, data, folder):
+    """Serialize dict to temp file and upsert to Drive."""
+    tmp_path = f"_tmp_{name}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    upsert_file(name, tmp_path, folder)
+    os.remove(tmp_path)
+
+
 def download_json(name, folder):
-    """Download a JSON file from Drive, returns parsed dict or None if not found."""
     existing = service.files().list(
         q=f"name='{name}' and '{folder}' in parents and trashed=false",
         fields="files(id, name)",
@@ -133,7 +164,6 @@ existing_log = download_json(TRAINING_LOG_FILENAME, folder_id) or []
 
 new_entry = build_log_entry(running_data, date_string)
 
-# Check if entry for this date already exists — update it if so
 cutoff = datetime.now() - timedelta(weeks=LOG_WINDOW_WEEKS)
 updated = False
 updated_log = []
@@ -144,11 +174,9 @@ for entry in existing_log:
     except Exception:
         continue
 
-    # Skip entries outside the window
     if entry_date < cutoff:
         continue
 
-    # Replace existing entry for same date
     if entry["date"] == new_entry["date"]:
         updated_log.append(new_entry)
         updated = True
@@ -158,7 +186,6 @@ for entry in existing_log:
 if not updated:
     updated_log.append(new_entry)
 
-# Sort by date descending — newest first
 updated_log.sort(key=lambda e: datetime.strptime(e["date"], "%d.%m.%Y"), reverse=True)
 
 print(f"training_log: {len(updated_log)} entries (window: {LOG_WINDOW_WEEKS} weeks)")
@@ -169,14 +196,16 @@ with open("training_log.json", "w", encoding="utf-8") as f:
 upsert_file(TRAINING_LOG_FILENAME, "training_log.json", folder_id)
 
 
-# --- Upload named run file → detailed_runs/ subfolder ---
+# --- Upload full running-data → detailed_runs/ subfolder ---
 
 runs_folder_id = get_or_create_subfolder(RUNS_SUBFOLDER, folder_id)
 print(f"Uploading: {filename} → {RUNS_SUBFOLDER}/")
 upsert_file(filename, "running-data.json", runs_folder_id)
 
 
-# --- Upload last_run.json → root folder ---
+# --- Upload stripped last_run.json → root folder ---
+# No time_series, no temperature duplicates (weather block is the source of truth)
 
 print(f"Uploading: {LAST_RUN_FILENAME}")
-upsert_file(LAST_RUN_FILENAME, "running-data.json", folder_id)
+last_run_data = build_last_run(running_data)
+upsert_json(LAST_RUN_FILENAME, last_run_data, folder_id)

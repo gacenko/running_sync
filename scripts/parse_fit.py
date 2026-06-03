@@ -370,6 +370,7 @@ if records:
 
 running_data = {
     "generated_at": datetime.datetime.now().isoformat(),
+    "activity_start": summary.get("startTimeLocal", "").split(".")[0],
     "activity": {
         "id":   activity.get("activityId"),
         "name": activity.get("activityName"),
