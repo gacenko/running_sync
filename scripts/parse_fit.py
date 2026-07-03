@@ -125,32 +125,68 @@ if workout:
         else:
             target = None
 
+        end_cond = step.get("endCondition", {}).get("conditionTypeKey")
+
         return {
-            "index":       index,
-            "type":        step.get("stepType"),
-            "description": step.get("description"),
-            "distance_m":  step.get("endConditionValue"),
-            "target":      target,
+            "index":        index,
+            "type":         step.get("stepType"),
+            "description":  step.get("description"),
+            "distance_m":   step.get("endConditionValue") if end_cond == "distance" else None,
+            "duration_sec": step.get("endConditionValue") if end_cond == "time" else None,
+            "target":       target,
         }
 
-    def collect_steps_fit(raw_steps):
+    def collect_steps_fit(raw_steps, out_structured, out_flat):
+        """
+        Парсить кроки тренування рекурсивно.
+
+        out_structured - зберігає repeat блоки як є (для workout.steps в JSON)
+        out_flat       - розгортає repeat блоки з урахуванням iterations
+                         (для підрахунку planned_active_count)
+        """
         for step in raw_steps:
             step_type = step.get("type", "")
-            if "repeat" in step_type.lower() or step.get("numberOfIterations"):
-                collect_steps_fit(step.get("workoutSteps", []))
-            else:
-                step_data = parse_step_fit(step, len(workout_steps))
-                workout_steps.append(step_data)
-                steps.append(step_data)
+            iterations = step.get("numberOfIterations")
 
-    steps = []
+            if "repeat" in step_type.lower() or iterations:
+                # Парсимо вкладені кроки
+                nested_structured = []
+                nested_flat = []
+                collect_steps_fit(
+                    step.get("workoutSteps", []),
+                    nested_structured,
+                    nested_flat,
+                )
+                # Структурований вигляд - зберігаємо repeat блок
+                out_structured.append({
+                    "type":       "repeat",
+                    "iterations": iterations,
+                    "steps":      nested_structured,
+                })
+                # Flat - розгортаємо iterations разів для правильного підрахунку
+                for _ in range(iterations or 1):
+                    out_flat.extend(nested_flat)
+            else:
+                s = parse_step_fit(step, len(out_flat))
+                out_structured.append(s)
+                out_flat.append(s)
+
+    structured_steps = []
+    flat_steps = []
     for segment in workout.get("workoutSegments", []):
-        collect_steps_fit(segment.get("workoutSteps", []))
+        collect_steps_fit(
+            segment.get("workoutSteps", []),
+            structured_steps,
+            flat_steps,
+        )
+
+    # workout_steps = flat list, використовується для planned_active_count нижче
+    workout_steps.extend(flat_steps)
 
     parsed_workout = {
         "id":    workout.get("workoutId"),
         "name":  workout.get("workoutName"),
-        "steps": steps,
+        "steps": structured_steps,
     }
 
 # Number of planned active intervals — used to tag extra laps as post_workout

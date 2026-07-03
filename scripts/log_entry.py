@@ -17,15 +17,16 @@ def _map_steps(steps):
             nested = _map_steps(step.get("steps", []))
             if nested:
                 result.append({
-                    "type":  "repeat",
-                    "reps":  step.get("reps"),
-                    "steps": nested,
+                    "type":       "repeat",
+                    "iterations": step.get("iterations"),  # було "reps" — неправильна назва
+                    "steps":      nested,
                 })
         else:
             result.append({
-                "type":       step_type,
-                "distance_m": step.get("distance_m"),
-                "target":     step.get("target"),
+                "type":         step_type,
+                "distance_m":   step.get("distance_m"),    # None для time-based кроків
+                "duration_sec": step.get("duration_sec"),  # None для distance-based кроків
+                "target":       step.get("target"),
             })
     return result
 
