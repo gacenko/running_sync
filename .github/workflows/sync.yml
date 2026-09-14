@@ -34,6 +34,7 @@ jobs:
           echo "${{ github.event.inputs.activity_id }}"
 
       - name: Download Garmin data
+        id: download
         env:
           GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
           GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
@@ -41,10 +42,12 @@ jobs:
           python scripts/download_fit.py
 
       - name: Parse data
+        if: steps.download.outputs.skip != 'true'
         run: |
           python scripts/parse_fit.py
 
       - name: Upload report to Google Drive
+        if: steps.download.outputs.skip != 'true'
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
@@ -54,6 +57,7 @@ jobs:
           python scripts/upload_drive.py
 
       - name: Upload artifacts
+        if: steps.download.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: running-data

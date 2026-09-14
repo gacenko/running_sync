@@ -14,17 +14,33 @@ client.login()
 
 print("Login successful")
 
-# ===== LOAD LATEST ACTIVITY =====
+# ===== LOAD LATEST RUNNING ACTIVITY =====
+# Strava webhook не надсилає sport_type, тому фільтруємо тут: беремо
+# останні 5 активностей з Garmin і шукаємо першу з typeKey == "running".
+# Якщо серед них немає бігу (наприклад прийшла велопоїздка) — пропускаємо
+# синхронізацію, щоб вона не потрапила в last_run/training_log/detailed_runs.
 
 print()
-print("Loading latest activity...")
+print("Loading latest activities...")
 
-activities = client.get_activities(0, 1)
+activities = client.get_activities(0, 5)
 
 if not activities:
     raise Exception("No activities found")
 
-latest = activities[0]
+latest = next(
+    (a for a in activities if a.get("activityType", {}).get("typeKey") == "running"),
+    None,
+)
+
+if latest is None:
+    print(f"No running activity in the last {len(activities)} activities — skipping sync")
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:
+        with open(github_output, "a") as f:
+            f.write("skip=true\n")
+    raise SystemExit(0)
+
 activity_id = latest["activityId"]
 workout_id = latest.get("workoutId")
 
