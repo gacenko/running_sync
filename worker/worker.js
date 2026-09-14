@@ -16,14 +16,9 @@ export default {
       console.log("WORKER_VERSION_2");
       console.log("BODY:", body);
 
-      // тільки нові бігові активності
+      // тільки нові активності — тип перевіряємо в download_fit.py
       if (body.object_type !== "activity" || body.aspect_type !== "create") {
         console.log("IGNORED EVENT: not a new activity");
-        return new Response("ignored");
-      }
-
-      if (body.sport_type !== "Run") {
-        console.log("IGNORED EVENT: sport_type =", body.sport_type);
         return new Response("ignored");
       }
 
