@@ -89,11 +89,19 @@ folder_id = os.environ["GOOGLE_DRIVE_FOLDER_ID"]
 
 # --- Helpers ---
 
+# Retries transient failures (timeouts, connection resets) with exponential
+# backoff — googleapiclient's execute() does nothing by default (num_retries=0),
+# so a single dropped connection used to crash the whole pipeline mid-upload
+# and leave Drive in an inconsistent state (e.g. training_log.json updated but
+# last_run.json not reached yet).
+DRIVE_NUM_RETRIES = 5
+
+
 def get_or_create_subfolder(name, parent_id):
     existing = service.files().list(
         q=f"name='{name}' and '{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
         fields="files(id, name)",
-    ).execute().get("files", [])
+    ).execute(num_retries=DRIVE_NUM_RETRIES).get("files", [])
 
     if existing:
         return existing[0]["id"]
@@ -103,7 +111,7 @@ def get_or_create_subfolder(name, parent_id):
         "mimeType": "application/vnd.google-apps.folder",
         "parents": [parent_id],
     }
-    result = service.files().create(body=metadata, fields="id").execute()
+    result = service.files().create(body=metadata, fields="id").execute(num_retries=DRIVE_NUM_RETRIES)
     print(f"Created subfolder: {name} (id: {result['id']})")
     return result["id"]
 
@@ -112,17 +120,17 @@ def upsert_file(name, local_path, folder):
     existing = service.files().list(
         q=f"name='{name}' and '{folder}' in parents and trashed=false",
         fields="files(id, name)",
-    ).execute().get("files", [])
+    ).execute(num_retries=DRIVE_NUM_RETRIES).get("files", [])
 
     media = MediaFileUpload(local_path, mimetype="application/json")
 
     if existing:
         file_id = existing[0]["id"]
-        service.files().update(fileId=file_id, media_body=media).execute()
+        service.files().update(fileId=file_id, media_body=media).execute(num_retries=DRIVE_NUM_RETRIES)
         print(f"Updated: {name} (id: {file_id})")
     else:
         metadata = {"name": name, "parents": [folder]}
-        result = service.files().create(body=metadata, media_body=media, fields="id").execute()
+        result = service.files().create(body=metadata, media_body=media, fields="id").execute(num_retries=DRIVE_NUM_RETRIES)
         print(f"Created: {name} (id: {result['id']})")
 
 
@@ -139,7 +147,7 @@ def download_json(name, folder):
     existing = service.files().list(
         q=f"name='{name}' and '{folder}' in parents and trashed=false",
         fields="files(id, name)",
-    ).execute().get("files", [])
+    ).execute(num_retries=DRIVE_NUM_RETRIES).get("files", [])
 
     if not existing:
         return None
@@ -150,7 +158,7 @@ def download_json(name, folder):
     downloader = MediaIoBaseDownload(buffer, request)
     done = False
     while not done:
-        _, done = downloader.next_chunk()
+        _, done = downloader.next_chunk(num_retries=DRIVE_NUM_RETRIES)
 
     buffer.seek(0)
     return json.loads(buffer.read().decode("utf-8"))
