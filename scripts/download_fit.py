@@ -20,29 +20,43 @@ print("Login successful")
 # Якщо серед них немає бігу (наприклад прийшла велопоїздка) — пропускаємо
 # синхронізацію, щоб вона не потрапила в last_run/training_log/detailed_runs.
 
-print()
-print("Loading latest activities...")
+# Retroactive mode (manual workflow run): reprocess a specific activity and
+# link a workout that was created in Garmin Connect after the run.
+activity_override = os.environ.get("GARMIN_ACTIVITY_ID", "").strip()
+workout_override = os.environ.get("GARMIN_WORKOUT_ID", "").strip()
 
-activities = client.get_activities(0, 5)
+if workout_override and not activity_override:
+    raise Exception("GARMIN_WORKOUT_ID needs GARMIN_ACTIVITY_ID, otherwise the workout could attach to the wrong run")
 
-if not activities:
-    raise Exception("No activities found")
+if activity_override:
+    activity_id = int(activity_override)
+    workout_id = int(workout_override) if workout_override else None
+    print()
+    print(f"Retroactive mode: activity {activity_id}, workout {workout_id}")
+else:
+    print()
+    print("Loading latest activities...")
 
-latest = next(
-    (a for a in activities if a.get("activityType", {}).get("typeKey") == "running"),
-    None,
-)
+    activities = client.get_activities(0, 5)
 
-if latest is None:
-    print(f"No running activity in the last {len(activities)} activities — skipping sync")
-    github_output = os.environ.get("GITHUB_OUTPUT")
-    if github_output:
-        with open(github_output, "a") as f:
-            f.write("skip=true\n")
-    raise SystemExit(0)
+    if not activities:
+        raise Exception("No activities found")
 
-activity_id = latest["activityId"]
-workout_id = latest.get("workoutId")
+    latest = next(
+        (a for a in activities if a.get("activityType", {}).get("typeKey") == "running"),
+        None,
+    )
+
+    if latest is None:
+        print(f"No running activity in the last {len(activities)} activities — skipping sync")
+        github_output = os.environ.get("GITHUB_OUTPUT")
+        if github_output:
+            with open(github_output, "a") as f:
+                f.write("skip=true\n")
+        raise SystemExit(0)
+
+    activity_id = latest["activityId"]
+    workout_id = latest.get("workoutId")
 
 print(f"Activity ID: {activity_id}")
 print(f"Workout ID: {workout_id}")
@@ -53,6 +67,13 @@ print()
 print("Loading activity...")
 
 activity = client.get_activity(activity_id)
+
+if activity_override:
+    type_key = (activity.get("activityTypeDTO") or {}).get("typeKey")
+    if type_key and type_key != "running":
+        raise Exception(f"Activity {activity_id} is '{type_key}', not a run")
+    if workout_id is None:
+        workout_id = (activity.get("metadataDTO") or {}).get("associatedWorkoutId")
 
 with open("activity.json", "w", encoding="utf-8") as f:
     json.dump(activity, f, ensure_ascii=False, indent=2)

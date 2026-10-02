@@ -53,6 +53,8 @@ def build_log_entry(running_data, activity_date_str):
             "name":  workout.get("name"),
             "steps": _map_steps(workout.get("steps", [])),
         }
+        if workout.get("plan_source"):
+            workout_out["plan_source"] = workout["plan_source"]
 
     # Result — key metrics only
     result = {

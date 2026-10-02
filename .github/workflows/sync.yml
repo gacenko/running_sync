@@ -7,10 +7,21 @@ on:
         description: "Strava activity ID"
         required: false
         type: string
+      garmin_activity_id:
+        description: "Retroactive: Garmin activity ID to reprocess (empty = normal flow)"
+        required: false
+        type: string
+      garmin_workout_id:
+        description: "Retroactive: Garmin workout ID to link to that activity (needs garmin_activity_id)"
+        required: false
+        type: string
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      GARMIN_ACTIVITY_ID: ${{ github.event.inputs.garmin_activity_id }}
+      GARMIN_WORKOUT_ID: ${{ github.event.inputs.garmin_workout_id }}
 
     steps:
 

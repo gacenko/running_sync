@@ -61,6 +61,11 @@ if os.path.exists("workout.json"):
     with open("workout.json", "r", encoding="utf-8") as f:
         workout = json.load(f)
 
+# Workout linked after the run (manual workflow run with garmin_workout_id)
+RETROACTIVE = bool(os.environ.get("GARMIN_WORKOUT_ID", "").strip())
+if RETROACTIVE and not workout:
+    raise SystemExit("Retroactive mode, but workout.json is missing — refusing to write a run without its plan")
+
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
@@ -188,6 +193,8 @@ if workout:
         "name":  workout.get("workoutName"),
         "steps": structured_steps,
     }
+    if RETROACTIVE:
+        parsed_workout["plan_source"] = "retroactive"
 
 # Number of planned active intervals — used to tag extra laps as post_workout
 planned_active_count = sum(
@@ -290,6 +297,21 @@ INTERVAL_TYPE_MAP = {
     "INTERVAL_RECOVERY": "recovery",
     "INTERVAL_COOLDOWN": "cooldown",
 }
+
+if RETROACTIVE and laps and not any(
+    (s.get("type") or "").startswith("INTERVAL_") for s in typed_splits["splits"]
+):
+    # The run was recorded without a structured workout, so Garmin has no
+    # INTERVAL_* splits. Wrap the measured laps, untouched, into one active
+    # interval — the same shape a workout-driven easy run gets.
+    moving = summary.get("movingDuration")
+    typed_splits["splits"].append({
+        **summary,
+        "type":               "INTERVAL_ACTIVE",
+        "lapIndexes":         [lap["lap"] for lap in laps],
+        "averageMovingSpeed": summary.get("averageMovingSpeed")
+                              or (summary["distance"] / moving if moving and summary.get("distance") else None),
+    })
 
 intervals = []
 logical_interval = 1
