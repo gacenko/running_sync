@@ -62,6 +62,8 @@ def build_log_entry(running_data, activity_date_str):
         "avg_pace":    summary.get("avg_pace"),
         "avg_hr":      summary.get("avg_hr"),
     }
+    if summary.get("distance_correction"):
+        result["distance_source"] = summary["distance_correction"]["source"]
 
     # Intervals — compact: type, avg_pace, avg_hr, splits
     intervals_out = []

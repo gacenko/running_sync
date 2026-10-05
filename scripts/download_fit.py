@@ -25,8 +25,8 @@ print("Login successful")
 activity_override = os.environ.get("GARMIN_ACTIVITY_ID", "").strip()
 workout_override = os.environ.get("GARMIN_WORKOUT_ID", "").strip()
 
-if workout_override and not activity_override:
-    raise Exception("GARMIN_WORKOUT_ID needs GARMIN_ACTIVITY_ID, otherwise the workout could attach to the wrong run")
+if (workout_override or os.environ.get("GARMIN_LAP_DISTANCE_M", "").strip()) and not activity_override:
+    raise Exception("GARMIN_WORKOUT_ID / GARMIN_LAP_DISTANCE_M need GARMIN_ACTIVITY_ID, otherwise they could change the wrong run")
 
 if activity_override:
     activity_id = int(activity_override)

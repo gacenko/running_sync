@@ -15,6 +15,14 @@ on:
         description: "Retroactive: Garmin workout ID to link to that activity (needs garmin_activity_id)"
         required: false
         type: string
+      lap_distance_m:
+        description: "Retroactive: true distance of each button lap in metres, e.g. 2000 (needs lap_range)"
+        required: false
+        type: string
+      lap_range:
+        description: "Retroactive: laps that get lap_distance_m, e.g. 1-7"
+        required: false
+        type: string
 
 jobs:
   sync:
@@ -22,6 +30,8 @@ jobs:
     env:
       GARMIN_ACTIVITY_ID: ${{ github.event.inputs.garmin_activity_id }}
       GARMIN_WORKOUT_ID: ${{ github.event.inputs.garmin_workout_id }}
+      GARMIN_LAP_DISTANCE_M: ${{ github.event.inputs.lap_distance_m }}
+      GARMIN_LAP_RANGE: ${{ github.event.inputs.lap_range }}
 
     steps:
 

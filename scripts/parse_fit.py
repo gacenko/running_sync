@@ -66,6 +66,23 @@ RETROACTIVE = bool(os.environ.get("GARMIN_WORKOUT_ID", "").strip())
 if RETROACTIVE and not workout:
     raise SystemExit("Retroactive mode, but workout.json is missing — refusing to write a run without its plan")
 
+# Button laps with a known true length (GPS under-counted them): GARMIN_LAP_DISTANCE_M + GARMIN_LAP_RANGE
+LAP_DISTANCE_M = float(os.environ.get("GARMIN_LAP_DISTANCE_M") or 0)
+LAP_RANGE = os.environ.get("GARMIN_LAP_RANGE", "").strip()
+if bool(LAP_DISTANCE_M) != bool(LAP_RANGE):
+    raise SystemExit("GARMIN_LAP_DISTANCE_M and GARMIN_LAP_RANGE must be set together")
+
+
+def parse_lap_range(spec):
+    laps_in_range = set()
+    for part in spec.split(","):
+        if "-" in part:
+            first, last = part.split("-")
+            laps_in_range.update(range(int(first), int(last) + 1))
+        elif part.strip():
+            laps_in_range.add(int(part))
+    return laps_in_range
+
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
@@ -220,6 +237,7 @@ subjective = {
 # --- Laps ---
 
 laps = []
+lap_strides = {}
 lap_number = 1
 cumulative_time = 0
 
@@ -254,6 +272,7 @@ for lap in fit.get_messages("lap"):
                 max_speed = max(lap_rec_speeds)
 
     strides = data.get("total_strides")
+    lap_strides[lap_number] = strides
     stride_length = None
     if strides and strides > 0 and distance >= 200:
         stride_length = round((distance / (strides * 2)) * 100, 1)
@@ -282,6 +301,29 @@ for lap in fit.get_messages("lap"):
     })
 
     lap_number += 1
+
+corrected_laps = set()
+gps_total_m = sum(l["distance_m"] for l in laps)
+
+if LAP_DISTANCE_M:
+    corrected_laps = parse_lap_range(LAP_RANGE)
+    missing = corrected_laps - {l["lap"] for l in laps}
+    if missing:
+        raise SystemExit(f"GARMIN_LAP_RANGE refers to laps that do not exist: {sorted(missing)}")
+
+    # Time, HR, cadence and best_pace are measured and stay. Only the GPS distance is replaced
+    # (the original is kept as gps_*), and pace / stride length are derived from it again.
+    for l in laps:
+        if l["lap"] not in corrected_laps:
+            continue
+        l["gps_distance_m"] = l["distance_m"]
+        l["gps_avg_pace"] = l["avg_pace"]
+        l["distance_m"] = LAP_DISTANCE_M
+        pace = speed_to_pace(LAP_DISTANCE_M / l["moving_time_sec"]) if l["moving_time_sec"] else None
+        l["avg_pace"] = pace
+        l["nonstop_pace"] = pace
+        strides = lap_strides.get(l["lap"])
+        l["avg_stride_length_cm"] = round(LAP_DISTANCE_M / (strides * 2) * 100, 1) if strides else None
 
 lap_map = {x["lap"]: x for x in laps}
 
@@ -372,6 +414,20 @@ for split in typed_splits["splits"]:
 
     if split_type != "INTERVAL_WARMUP":
         logical_interval += 1
+
+
+new_total_m = sum(l["distance_m"] for l in laps)
+
+for interval in intervals:
+    if not corrected_laps & set(interval["summary"]["laps"]):
+        continue
+    sm = interval["summary"]
+    old_m = sm["distance_m"]
+    sm["distance_m"] = round(sum(lap_map[x]["distance_m"] for x in sm["laps"] if x in lap_map), 2)
+    sm["avg_pace"] = speed_to_pace(sm["distance_m"] / sm["duration_sec"]) if sm["duration_sec"] else None
+    sm["nonstop_pace"] = speed_to_pace(sm["distance_m"] / sm["moving_time_sec"]) if sm["moving_time_sec"] else None
+    if sm.get("avg_stride_length_cm") and old_m:
+        sm["avg_stride_length_cm"] = sm["avg_stride_length_cm"] * sm["distance_m"] / old_m
 
 
 # --- Time series ---
@@ -467,6 +523,21 @@ running_data = {
         "data": time_series,
     },
 }
+
+if corrected_laps:
+    s = running_data["activity"]["summary"]
+    gps_km = s["distance_km"]
+    s["distance_km"] = round(new_total_m / 1000, 2)
+    duration = summary.get("duration")
+    s["avg_pace"] = speed_to_pace(new_total_m / duration) if duration else None
+    if s.get("avg_stride_length_cm") and gps_total_m:
+        s["avg_stride_length_cm"] = round(s["avg_stride_length_cm"] * new_total_m / gps_total_m, 1)
+    s["distance_correction"] = {
+        "source":          "manual_laps",
+        "lap_distance_m":  LAP_DISTANCE_M,
+        "laps":            LAP_RANGE,
+        "gps_distance_km": gps_km,
+    }
 
 with open("running-data.json", "w", encoding="utf-8") as f:
     json.dump(running_data, f, ensure_ascii=False, indent=2, default=str)
