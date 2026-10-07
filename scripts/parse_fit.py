@@ -66,22 +66,33 @@ RETROACTIVE = bool(os.environ.get("GARMIN_WORKOUT_ID", "").strip())
 if RETROACTIVE and not workout:
     raise SystemExit("Retroactive mode, but workout.json is missing — refusing to write a run without its plan")
 
-# Button laps with a known true length (GPS under-counted them): GARMIN_LAP_DISTANCE_M + GARMIN_LAP_RANGE
+# Laps with a known true length (GPS got them wrong): GARMIN_LAP_RANGE like "1-7" or "1-3,4:100".
+# A part without ":metres" uses GARMIN_LAP_DISTANCE_M.
 LAP_DISTANCE_M = float(os.environ.get("GARMIN_LAP_DISTANCE_M") or 0)
 LAP_RANGE = os.environ.get("GARMIN_LAP_RANGE", "").strip()
-if bool(LAP_DISTANCE_M) != bool(LAP_RANGE):
-    raise SystemExit("GARMIN_LAP_DISTANCE_M and GARMIN_LAP_RANGE must be set together")
+if LAP_DISTANCE_M and not LAP_RANGE:
+    raise SystemExit("GARMIN_LAP_DISTANCE_M needs GARMIN_LAP_RANGE")
 
 
-def parse_lap_range(spec):
-    laps_in_range = set()
+def parse_lap_range(spec, default_m):
+    """'1-3,4:100' -> {1: default_m, 2: default_m, 3: default_m, 4: 100.0}"""
+    distances = {}
     for part in spec.split(","):
-        if "-" in part:
-            first, last = part.split("-")
-            laps_in_range.update(range(int(first), int(last) + 1))
-        elif part.strip():
-            laps_in_range.add(int(part))
-    return laps_in_range
+        part = part.strip()
+        if not part:
+            continue
+        span, _, metres = part.partition(":")
+        value = float(metres) if metres else default_m
+        if not value:
+            raise SystemExit(f"No distance for '{part}': set GARMIN_LAP_DISTANCE_M or write laps:metres")
+        if "-" in span:
+            first, last = span.split("-")
+            lap_numbers = range(int(first), int(last) + 1)
+        else:
+            lap_numbers = [int(span)]
+        for lap_number in lap_numbers:
+            distances[lap_number] = value
+    return distances
 
 KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
@@ -305,8 +316,9 @@ for lap in fit.get_messages("lap"):
 corrected_laps = set()
 gps_total_m = sum(l["distance_m"] for l in laps)
 
-if LAP_DISTANCE_M:
-    corrected_laps = parse_lap_range(LAP_RANGE)
+if LAP_RANGE:
+    lap_distances = parse_lap_range(LAP_RANGE, LAP_DISTANCE_M)
+    corrected_laps = set(lap_distances)
     missing = corrected_laps - {l["lap"] for l in laps}
     if missing:
         raise SystemExit(f"GARMIN_LAP_RANGE refers to laps that do not exist: {sorted(missing)}")
@@ -316,14 +328,15 @@ if LAP_DISTANCE_M:
     for l in laps:
         if l["lap"] not in corrected_laps:
             continue
+        metres = lap_distances[l["lap"]]
         l["gps_distance_m"] = l["distance_m"]
         l["gps_avg_pace"] = l["avg_pace"]
-        l["distance_m"] = LAP_DISTANCE_M
-        pace = speed_to_pace(LAP_DISTANCE_M / l["moving_time_sec"]) if l["moving_time_sec"] else None
+        l["distance_m"] = metres
+        pace = speed_to_pace(metres / l["moving_time_sec"]) if l["moving_time_sec"] else None
         l["avg_pace"] = pace
         l["nonstop_pace"] = pace
         strides = lap_strides.get(l["lap"])
-        l["avg_stride_length_cm"] = round(LAP_DISTANCE_M / (strides * 2) * 100, 1) if strides else None
+        l["avg_stride_length_cm"] = round(metres / (strides * 2) * 100, 1) if strides else None
 
 lap_map = {x["lap"]: x for x in laps}
 

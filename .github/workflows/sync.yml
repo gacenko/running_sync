@@ -16,11 +16,11 @@ on:
         required: false
         type: string
       lap_distance_m:
-        description: "Retroactive: true distance of each button lap in metres, e.g. 2000 (needs lap_range)"
+        description: "Retroactive: default true distance of a button lap in metres, e.g. 2000"
         required: false
         type: string
       lap_range:
-        description: "Retroactive: laps that get lap_distance_m, e.g. 1-7"
+        description: "Retroactive: laps to correct, e.g. 1-7, or per-lap metres like 1-3,4:100"
         required: false
         type: string
 
